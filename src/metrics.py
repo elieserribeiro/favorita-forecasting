@@ -72,3 +72,50 @@ def summarize(long: pd.DataFrame, models: list[str]) -> pd.DataFrame:
                 "Viés": bias(true_units, pred_units),
             })
     return pd.DataFrame(rows).set_index(["Período", "Modelo"])
+
+
+def _fortnight_totals(g: pd.DataFrame, model: str) -> pd.DataFrame:
+    """Actual and predicted units summed per store x item x fortnight."""
+    return (pd.DataFrame({
+        "pair": g["store_nbr"].astype("int64").to_numpy() * 10_000_000 + g["item_nbr"].to_numpy(),
+        "q": np.where(g["h"].to_numpy() <= 15, 1, 2),
+        "t": np.expm1(g["y_true"].to_numpy("float64")),
+        "p": np.expm1(g[model].to_numpy("float64").clip(0)),
+    }).groupby(["pair", "q"])[["t", "p"]].sum())
+
+
+def segment_report(long: pd.DataFrame, model: str, segment: str) -> pd.DataFrame:
+    """Error of one model by business segment (ABC class, family, store type...)."""
+    total_units = np.expm1(long["y_true"].to_numpy("float64")).sum()
+    rows = []
+    for seg, g in long.groupby(segment, observed=True):
+        tot = _fortnight_totals(g, model)
+        rows.append({
+            segment: seg,
+            "% do volume": tot["t"].sum() / total_units,
+            "NWRMSLE": nwrmsle(g["y_true"], g[model].clip(lower=0), perishable_weights(g["perishable"])),
+            "WAPE quinzenal": wape(tot["t"], tot["p"]),
+            "Viés": bias(tot["t"], tot["p"]),
+        })
+    return pd.DataFrame(rows).set_index(segment)
+
+
+def stock_impact(long: pd.DataFrame, models: list[str]) -> pd.DataFrame:
+    """Translate fortnight errors into stock language.
+
+    Falta   : units of demand NOT covered by the forecast (risk of stockout)
+    Excesso : units forecast ABOVE demand (risk of overstock / losses)
+    Both as % of the actual volume, per fortnight.
+    """
+    rows = []
+    for m in models:
+        tot = _fortnight_totals(long, m)
+        for q, g in tot.groupby(level="q"):
+            real = g["t"].sum()
+            rows.append({
+                "Quinzena": f"{q}ª quinzena", "Modelo": m,
+                "Realizado (unid.)": real, "Previsto (unid.)": g["p"].sum(),
+                "Falta (% do real)": (g["t"] - g["p"]).clip(lower=0).sum() / real,
+                "Excesso (% do real)": (g["p"] - g["t"]).clip(lower=0).sum() / real,
+            })
+    return pd.DataFrame(rows).set_index(["Quinzena", "Modelo"])

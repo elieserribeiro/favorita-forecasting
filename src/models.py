@@ -126,3 +126,13 @@ def to_long(df: pd.DataFrame, preds: dict[str, np.ndarray]) -> pd.DataFrame:
     for name, arr in preds.items():
         out[name] = arr.astype("float32").ravel()
     return out
+
+
+def predict_saved(df: pd.DataFrame, holidays: pd.DatetimeIndex, models_dir: Path,
+                  horizons=range(1, N_HORIZONS + 1)) -> np.ndarray:
+    """Predict with the models saved by ``train_direct`` (log1p scale)."""
+    preds = []
+    for h in horizons:
+        model = lgb.Booster(model_file=str(Path(models_dir) / f"lgbm_h{h:02d}.txt"))
+        preds.append(model.predict(horizon_frame(df, h, holidays)).clip(0))
+    return np.column_stack(preds)
