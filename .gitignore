@@ -1,7 +1,8 @@
 .venv/
-data/
-models/
+/data/
+/models/
 *.parquet
+!app/data/*.parquet
 .ipynb_checkpoints/
 __pycache__/
 kaggle.json
